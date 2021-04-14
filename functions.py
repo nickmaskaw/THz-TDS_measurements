@@ -92,7 +92,7 @@ class Identity:
         vals = (date, time, self.start, self.end, self.sens,
                 self.tcons, self.vel, self.vbias, self.freq, self.hum)
         
-        df = pd.DataFrame(dict(zip(cols, vals)), columns=cols)
+        df = pd.DataFrame(dict(zip(cols, vals)), index=[0])
         
         return df
             
@@ -257,12 +257,6 @@ class Data:
         axf.set_xlim([-0.2, 5.2])
         axf.set_ylim([1e-5, 1])
         axf.set_yscale('log')
-        
-        #axp = fig.add_subplot(222)
-        #axp.plot(self.freq.frq, self.freq.phs)
-        #axp.set_xlabel('frequency (THz)')
-        #axp.set_ylabel('phase (rad)')
-        #axp.set_xlim([-0.2, 5.2])
     
     
 class Plot:
@@ -336,5 +330,33 @@ class Plot:
         if save_file: cls.save_fig(save_file, save_dpi)    
             
             
+class FileList:
+    def __init__(self, folder):
+        self.folder = folder
+        self.time   = tm.strftime('%d/%m/%Y @ %H:%M:%S')
+        self.table  = self.frame(folder, *os.listdir(folder))
+        
+    def __repr__(self):
+        return f'File list of "{self.folder}" generated on {self.time}'
+    
+    def get_file(self, index):
+        return self.table.file[index]
+    
+    def get_table(self, date=None):
+        return self.table if not date else self.table[self.table['date'] == date]
+    
+    @classmethod
+    def frame(cls, folder, *files):
+        cols = ['date', 'time', 'start', 'end', 'sens', 
+                'tcons', 'vel', 'vbias', 'freq', 'hum', 'file']
+        df = pd.DataFrame(columns=cols)
+        
+        for file in files:
+            idn = Identity.decode(file)
+            idn_frame = idn.frame()
+            idn_frame['file'] = file
             
+            df = df.append(idn_frame, ignore_index=True)
+        
+        return df            
             
