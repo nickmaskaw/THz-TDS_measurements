@@ -280,10 +280,13 @@ class Plot:
         plt.savefig(f'{Plot.folder}/{file_name}', dpi=dpi_val)
         
     @classmethod
-    def get_label(cls, data, label):
-        idn = Identity.decode(data.file)
-        idn_frame = idn.frame()        
-        return f'{idn_frame[label][0]}' if label in idn_frame else None
+    def get_label(cls, data, label, index):
+        if isinstance(label, list):
+            return f'{label[index]}'
+        else:
+            idn = Identity.decode(data.file)
+            idn_frame = idn.frame()        
+            return f'{idn_frame[label][0]}' if label in idn_frame else None
     
     @classmethod
     def new_figure(cls, nrows=1, ncolumns=1, title=None, fig_size=[5, 5],
@@ -297,9 +300,9 @@ class Plot:
     def time_domain(cls, ax, *data_list, label=None, leg_title=None):
         colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
         
-        for data, c in zip(data_list, colors):
-            l = cls.get_label(data, label)
-            ax.plot(data.time.t, data.time.I, color=c, label=l)
+        for i, data in enumerate(data_list):
+            l = cls.get_label(data, label, i)
+            ax.plot(data.time.t, data.time.I, color=colors[i], label=l)
             
         if leg_title: ax.legend(title=leg_title)
         ax.set_xlabel('Time (ps)')
@@ -311,9 +314,9 @@ class Plot:
     def freq_domain(cls, ax, *data_list, label=None, leg_title=None):
         colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
             
-        for data, c in zip(data_list, colors):
-            l = cls.get_label(data, label)
-            ax.plot(data.freq.frq, data.freq.amp, color=c, label=l)
+        for i, data in enumerate(data_list):
+            l = cls.get_label(data, label, i)
+            ax.plot(data.freq.frq, data.freq.amp, color=colors[i], label=l)
             
         if leg_title: ax.legend(title=leg_title)
         ax.set_yscale('log')
