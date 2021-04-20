@@ -222,6 +222,9 @@ class Data:
         self.time = self.read_time_domain_data(file)
         self.freq = self.compute_fft()
         
+    def __repr__(self):
+        return f'Data from file {self.file}'
+        
     def read_time_domain_data(self, file):
         return pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
     
@@ -257,6 +260,11 @@ class Data:
         axf.set_xlim([-0.2, 5.2])
         axf.set_ylim([1e-5, 1])
         axf.set_yscale('log')
+        
+    @classmethod
+    def data_list(cls, file_list, *indices):
+        data_list_ = list(Data(file_list.get_file(i)) for i in indices)
+        return data_list_
     
     
 class Plot:
@@ -267,67 +275,53 @@ class Plot:
         cls.folder = folder
     
     @classmethod
-    def save_fig(cls, file_name, dpi_val):
+    def save_fig(cls, file_name, dpi_val=300):
         if not os.path.exists(Plot.folder): os.makedirs(Plot.folder)
         plt.savefig(f'{Plot.folder}/{file_name}', dpi=dpi_val)
+        
+    @classmethod
+    def get_label(cls, data, label):
+        idn = Identity.decode(data.file)
+        idn_frame = idn.frame()        
+        return f'{idn_frame[label][0]}' if label in idn_frame else None
     
     @classmethod
-    def time_domain(cls, *args, label=None, leg_title=None, fig_size=[5, 5],
-                    font_size=16, save_file=None, save_dpi=300):
-        colors = cm.rainbow(np.linspace(0, 1, len(args)))
-        
+    def new_figure(cls, nrows=1, ncolumns=1, title=None, fig_size=[5, 5],
+                   font_size=16):
         with plt.rc_context({'font.size': font_size}):
-            fig = plt.figure(figsize=fig_size)
-            ax  = fig.add_subplot(111)
+            fig, ax = plt.subplots(nrows, ncolumns, figsize=fig_size)
+        fig.suptitle(title)
+        return fig, ax
         
-        for data, c in zip(args, colors):
-            idn = Identity.decode(data.file)
-            if label in idn.__dict__:
-                l = f'{idn.__dict__[label]}'
-            else:
-                l = None
+    @classmethod
+    def time_domain(cls, ax, *data_list, label=None, leg_title=None):
+        colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
+        
+        for data, c in zip(data_list, colors):
+            l = cls.get_label(data, label)
+            ax.plot(data.time.t, data.time.I, color=c, label=l)
             
-            t = data.time.t
-            I = data.time.I
-            ax.plot(t, I, color=c, label=l)
-            
-        if l: ax.legend(title=leg_title, fontsize=.7*font_size)
+        if leg_title: ax.legend(title=leg_title)
         ax.set_xlabel('Time (ps)')
         ax.set_ylabel('Photocurrent (nA)')
         plt.tight_layout()
-        
-        if save_file: cls.save_fig(save_file, save_dpi)
 
             
-    @staticmethod
-    def freq_domain(*args, label=None, leg_title=None, fig_size=[5, 5],
-                    font_size=16, save_file=None, save_dpi=300):
-        colors = cm.rainbow(np.linspace(0, 1, len(args)))
-        
-        with plt.rc_context({'font.size': font_size}):
-            fig = plt.figure(figsize=fig_size)
-            ax = fig.add_subplot(111)
+    @classmethod
+    def freq_domain(cls, ax, *data_list, label=None, leg_title=None):
+        colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
             
-        for data, c in zip(args, colors):
-            idn = Identity.decode(data.file)
-            if label in idn.__dict__:
-                l = f'{idn.__dict__[label]}'
-            else:
-                l = None
-                
-            freq = data.freq.frq
-            ampl = data.freq.amp
-            ax.plot(freq, ampl, color=c, label=l)
+        for data, c in zip(data_list, colors):
+            l = cls.get_label(data, label)
+            ax.plot(data.freq.frq, data.freq.amp, color=c, label=l)
             
-        if l: ax.legend(title=leg_title, fontsize=.7*font_size)
+        if leg_title: ax.legend(title=leg_title)
         ax.set_yscale('log')
         ax.set_xlim([-0.2, 5.2])
         ax.set_ylim([1e-5, 1])
         ax.set_xlabel('Frequency (THz)')
         ax.set_ylabel('Amplitude (a. u.)')
         plt.tight_layout()
-            
-        if save_file: cls.save_fig(save_file, save_dpi)    
             
             
 class FileList:
@@ -342,8 +336,9 @@ class FileList:
     def get_file(self, index):
         return self.table.file[index]
     
-    def get_table(self, date=None):
-        return self.table if not date else self.table[self.table['date'] == date]
+    def get_table(self, date=None, hide_file=True):
+        df = self.table if not hide_file else self.table.drop('file', axis=1)
+        return df if not date else df[df['date'] == date]
     
     @classmethod
     def frame(cls, folder, *files):
