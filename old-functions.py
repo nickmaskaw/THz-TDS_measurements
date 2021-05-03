@@ -13,23 +13,6 @@ import matplotlib.cm as cm
 from scipy.fft import fft, fftfreq
 import time as tm
 import os
-import sys
-
-import clr
-from System import String
-from System import Decimal
-from System.Collections import *
-
-if not r'C:\Program Files\Thorlabs\Kinesis' in sys.path:
-    sys.path.append(r'C:\Program Files\Thorlabs\Kinesis')
-    
-clr.AddReference("Thorlabs.MotionControl.DeviceManagerCLI")
-from Thorlabs.MotionControl.DeviceManagerCLI import *
-
-clr.AddReference("Thorlabs.MotionControl.KCube.BrushlessMotorCLI")
-from Thorlabs.MotionControl.KCube.BrushlessMotorCLI import *
-
-
 
 class Constants:
     C     = 299_792_458*1e3/1e12  # mm/ps (~0.3mm/ps)
@@ -158,7 +141,7 @@ class Identity:
 class Measurement:
     folder = './output' 
     
-    def __init__(self, idn, Imin=-6, Imax=6.5, dt=0.1, step=None):
+    def __init__(self, idn, Imin=-1.1, Imax=2.1, dt=0.1):
         if not os.path.exists(Measurement.folder): os.makedirs(Measurement.folder)
         
         # Identity object with the measurement info
@@ -168,20 +151,22 @@ class Measurement:
         self.ymin = Convert.I_to_v(Imin, idn.sens)
         self.ymax = Convert.I_to_v(Imax, idn.sens)
         
+        # Compute the measurement's total time, in seconds:
+        self.T    = (idn.start - idn.end) / idn.vel
+        
         # Given the dt between measurements (in s), compute the number of points:
         self.dt   = dt
+        self.N    = int(self.T / self.dt)
         
-    def create_plot(self, delayline):
+    def create_plot(self):
         plt.close('all')
         self.fig   = plt.figure('delay', figsize=[9, 7])
         self.ax    = self.fig.add_subplot(111)
         self.line, = self.ax.plot(np.nan, np.nan)
         plt.show(block=False)
         self.fig.canvas.draw()
+        self.ax.set_xlim([0, self.T])
         self.ax.set_ylim([self.ymin, self.ymax])
-        
-        if not delayline: self.ax.set_xlim([0, self.T])
-        else:             self.ax.set_xlim([self.idn.start, self.idn.end])
         
     def update_plot(self, x_data, y_data):
         self.line.set_xdata(x_data)
@@ -201,56 +186,29 @@ class Measurement:
         data = pd.DataFrame({'t': Convert.mm_to_ps(2*d), 'I': I, 'd': d})
         data.to_csv(f'{Measurement.folder}/{self.idn}', sep='\t', index=False)
         
-    def start(self, multimeter, delayline, step=None):
-        start = self.idn.start
-        end   = self.idn.end
-        vel   = self.idn.vel
-        tcons = self.idn.tcons * 1e-3  # integration time in seconds
-        sens  = self.idn.sens
-        dt    = self.dt
-        
-        delayline.start_polling(10)
-        delayline.set_vel(vel)
+    def start(self, multimeter):
+        #if not multimeter: sample = pd.read_csv('sample.txt', sep='\t', decimal=',')
         
         t0 = tm.time()
-        if not step:
-            T = (start - end) / vel
-            N = int(T / dt)
-            
-            v = np.full(N, np.nan)     # Multimeter reads
-            d = np.full(N, np.nan)     # Delayline position
         
-            delayline.move_to(end, timeout=0)
-            for i in range(N):
-                tm.sleep(dt - (tm.time()-t0)%dt)
-            
-                d[i] = delayline.get_pos()
-                v[i] = multimeter.get_meas()
-                self.update_plot(d, v)
-                
-                if d[i] <= end: break
+        # Arrays to store the data:
+        v = np.full(self.N, np.nan)     # Multimeter reads
+        t = np.full(self.N, np.nan)     # Instant of measurement
         
-        else:  # if step:            
-            N   = int(abs(start - end) / step)
-            pos = np.arange(start, end, -step)
+        for i in range(self.N):
+            tm.sleep(self.dt - (tm.time()-t0)%self.dt)
             
-            v = np.full(N, np.nan)     # Multimeter reads
-            d = np.full(N, np.nan)     # Delayline position
-            
-            for i in range(N):
-                delayline.move_to(pos[i])
-                tm.sleep(tcons)
-                
-                d[i] = delayline.get_pos()
-                v[i] = multimeter.get_meas()
-                self.update_plot(d, v)
-                
-        delayline.stop_polling()
-            
-        I = Convert.v_to_I(v, sens)
+            t[i] = tm.time() - t0
+            v[i] = multimeter.get_meas()  # sample.v[i] if not multimeter else multimeter.get_meas()
+            self.update_plot(t, v)
+
+            if t[i] > self.T: break
+        
+        d = self.idn.vel * t  # Delay line displacements
+        I = Convert.v_to_I(v, self.idn.sens)
         
         self.final_plot(d, I)
-        self.save_data(start-d, I)
+        self.save_data(d, I)
         
     def get_filename(self):
         return str(self.idn)
@@ -400,94 +358,3 @@ class FileList:
         
         return df            
             
-        
-        
-class KBD101:
-    def __init__(self, serial, simulated=False):
-        self._serial = serial
-        self._device = self._build_device(serial, simulated)
-        
-        self.connect()
-        tm.sleep(.2)
-        self._motor_config = self._load_motor_config(serial)
-        
-    def __repr__(self):
-        info = self.get_info()
-        return 'Device: {} (serial no. {})  |  Stage: {} (serial no. {})'.format(*tuple(info.values()))
-    
-    def _build_device(self, serial, simulated=False):
-        if isinstance(serial, str) and serial[:2] == '28':
-            if not simulated: DeviceManagerCLI.BuildDeviceList()
-            else: SimulationManager.Instance.InitializeSimulations()
-                
-            device_list = DeviceManagerCLI.GetDeviceList()
-            if serial in device_list:
-                device = KCubeBrushlessMotor.CreateKCubeBrushlessMotor(serial)
-                return device
-            else:
-                print('Check in the intended serial number is listed below:')
-                print(device_list)
-                return None
-        else:
-            print('Check if the intended serial number is a string that begins with "28".')
-            return None
-        
-    def _load_motor_config(self, serial):
-        motor_config = self._device.LoadMotorConfiguration(serial)
-        return motor_config
-        
-    def connect(self):
-        self._device.Connect(self._serial)
-        
-    def disconnect(self):
-        self._device.Disconnect()
-        
-    def get_info(self):
-        device_info = self._device.GetDeviceInfo()
-        stage_info  = self._device.GetStageDefinition()
-        useful_info = {'deviceName'   : device_info.Name,
-                       'deviceSerial' : device_info.SerialNumber,
-                       'stageName'    : stage_info.PartNumber,
-                       'stageSerial'  : stage_info.SerialNumber}
-        return useful_info
-    
-    def enable(self):
-        self._device.EnableDevice()
-        tm.sleep(2)
-        
-    def disable(self):
-        self._device.DisableDevice()
-    
-    def start_polling(self, rate=50):
-        self._device.StartPolling(rate)
-        
-    def stop_polling(self):
-        self._device.StopPolling()
-        
-    def get_polling_rate(self):
-        return self._device.PollingDuration()
-        
-    def home(self, polling_rate=50, timeout=60000):
-        poll = False if self.get_polling_rate() else True
-        
-        if poll: self.start_polling()
-        self._device.Home(timeout)
-        if poll: self.stop_polling()
-            
-    def move_to(self, pos, timeout=60000):
-        self._device.MoveTo(Decimal(float(pos)), timeout)
-        
-    def return_to(self, pos, timeout=60000):
-        self.set_vel(100)
-        self.move_to(pos)
-        
-    def get_pos(self):
-        pos = str(self._device.Position).replace(',', '.')
-        return float(pos)
-    
-    def get_vel(self):
-        vel = str(self._device.GetVelocityParams().MaxVelocity).replace(',', '.')
-        return float(vel)
-    
-    def set_vel(self, vel, acceleration=999):
-        self._device.SetVelocityParams(Decimal(vel), Decimal(acceleration))
