@@ -53,10 +53,13 @@ class Convert:
     
     
 class Multimeter:
-    def __init__(self, VISA_ADDRESS='USB0::0x0957::0x0607::MY47027685::INSTR'):
+    def __init__(self, init_open=True, 
+                 VISA_ADDRESS='USB0::0x0957::0x0607::MY47027685::INSTR'):
         self.VISA_ADDRESS = VISA_ADDRESS
         self.instr = None
         self.instr_idn = 'no instrument'
+        
+        if init_open: self.open_()
         
     def __repr__(self):
         return f'This instrument: {self.instr_idn}'
@@ -80,7 +83,7 @@ class Multimeter:
     
 class Identity:
     def __init__(self, start, end, sens, tcons, vel,
-                 vbias, freq, hum, time_stamp=None):
+                 vbias, freq, hum, obs='', time_stamp=None):
         self.time_stamp = time_stamp
         
         self.start = start  # mm
@@ -91,6 +94,7 @@ class Identity:
         self.vbias = vbias  # V
         self.freq  = freq   # Hz
         self.hum   = hum    # %
+        self.obs   = obs
         
     def update_time_stamp(self):
         self.time_stamp = tm.strftime('%Y%m%d-%H%M%S')
@@ -105,9 +109,9 @@ class Identity:
             time = None
         
         cols = ('date', 'time', 'start', 'end', 'sens',
-                'tcons', 'vel', 'vbias', 'freq', 'hum')
-        vals = (date, time, self.start, self.end, self.sens,
-                self.tcons, self.vel, self.vbias, self.freq, self.hum)
+                'tcons', 'vel', 'vbias', 'freq', 'hum', 'obs')
+        vals = (date, time, self.start, self.end, self.sens, self.tcons,
+                self.vel, self.vbias, self.freq, self.hum, self.obs)
         
         df = pd.DataFrame(dict(zip(cols, vals)), index=[0])
         
@@ -116,9 +120,9 @@ class Identity:
     def __str__(self):
         if not self.time_stamp: self.update_time_stamp()
         
-        f = '{}__{}to{}mm__{}nA__{}ms__{}mmps__{}V__{}Hz__{}%__.txt'
+        f = '{}__{}to{}mm__{}nA__{}ms__{}mmps__{}V__{}Hz__{}%__{}.txt'
         args = ('time_stamp', 'start', 'end', 'sens', 
-                'tcons', 'vel', 'vbias', 'freq', 'hum')
+                'tcons', 'vel', 'vbias', 'freq', 'hum', 'obs')
         
         return f.format(*(self.__dict__[n] for n in args))
     
@@ -138,9 +142,10 @@ class Identity:
         vbias = p[5].split('V')[0]
         freq  = p[6].split('Hz')[0]
         hum   = p[7].split('%')[0]
+        obs   = p[8].split('.txt')[0]
         
-        idn = Identity(*cls.int_or_float(start, end, sens, tcons, vel,
-                                         vbias, freq, hum), time_stamp)
+        idn = Identity(*cls.int_or_float(start, end, sens, tcons, vel, vbias,
+                                         freq, hum), obs, time_stamp)
         return idn
         
     @classmethod
@@ -171,17 +176,15 @@ class Measurement:
         # Given the dt between measurements (in s), compute the number of points:
         self.dt   = dt
         
-    def create_plot(self, delayline):
+    def create_plot(self):
         plt.close('all')
         self.fig   = plt.figure('delay', figsize=[9, 7])
         self.ax    = self.fig.add_subplot(111)
         self.line, = self.ax.plot(np.nan, np.nan)
         plt.show(block=False)
         self.fig.canvas.draw()
+        self.ax.set_xlim([self.idn.start, self.idn.end])
         self.ax.set_ylim([self.ymin, self.ymax])
-        
-        if not delayline: self.ax.set_xlim([0, self.T])
-        else:             self.ax.set_xlim([self.idn.start, self.idn.end])
         
     def update_plot(self, x_data, y_data):
         self.line.set_xdata(x_data)
@@ -195,6 +198,7 @@ class Measurement:
         self.fig.clf()
         self.ax = self.fig.add_subplot(111)
         self.ax.plot(x_data, y_data)
+        self.ax.set_xlim([self.idn.start, self.idn.end])
         
     def save_data(self, d, I):
         self.idn.update_time_stamp()
@@ -202,6 +206,8 @@ class Measurement:
         data.to_csv(f'{Measurement.folder}/{self.idn}', sep='\t', index=False)
         
     def start(self, multimeter, delayline, step=None):
+        self.create_plot()
+        
         start = self.idn.start
         end   = self.idn.end
         vel   = self.idn.vel
@@ -479,7 +485,7 @@ class KBD101:
         
     def return_to(self, pos, timeout=60000):
         self.set_vel(100)
-        self.move_to(pos)
+        self.move_to(pos, timeout)
         
     def get_pos(self):
         pos = str(self._device.Position).replace(',', '.')
