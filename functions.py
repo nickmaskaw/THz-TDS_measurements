@@ -359,17 +359,18 @@ class Plot:
 
             
     @classmethod
-    def freq_domain(cls, ax, *data_list, label=None, leg_title=None):
+    def freq_domain(cls, ax, *data_list, y='amp', yscale='log', ymin=1e-4,
+                    ymax=1, label=None, leg_title=None):
         colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
             
         for i, data in enumerate(data_list):
             l = cls.get_label(data, label, i)
-            ax.plot(data.freq.frq, data.freq.amp, color=colors[i], label=l)
+            ax.plot(data.freq.frq, np.real(data.freq[y]), color=colors[i], label=l)
             
         if leg_title: ax.legend(title=leg_title)
-        ax.set_yscale('log')
+        ax.set_yscale(yscale)
         ax.set_xlim([-0.2, 5.2])
-        ax.set_ylim([1e-5, 1])
+        ax.set_ylim([ymin, ymax])
         ax.set_xlabel('Frequency (THz)')
         ax.set_ylabel('Amplitude (a. u.)')
         plt.tight_layout()
