@@ -245,7 +245,7 @@ class Measurement:
             
             for i in range(N):
                 delayline.move_to(pos[i])
-                tm.sleep(tcons)
+                tm.sleep(3*tcons)
                 
                 d[i] = delayline.get_pos()
                 v[i] = multimeter.get_meas()
@@ -365,7 +365,7 @@ class Plot:
             
         for i, data in enumerate(data_list):
             l = cls.get_label(data, label, i)
-            ax.plot(data.freq.frq, np.real(data.freq[y]), color=colors[i], label=l)
+            ax.plot(data.freq.frq, np.abs(data.freq[y]), color=colors[i], label=l)
             
         if leg_title: ax.legend(title=leg_title)
         ax.set_yscale(yscale)
@@ -388,7 +388,8 @@ class FileList:
     def get_file(self, index):
         return self.table.file[index]
     
-    def get_table(self, date=None, hide_file=True):
+    def get_table(self, date=None, hide_file=True, max_rows=60):
+        pd.set_option('display.max_rows', max_rows)
         df = self.table if not hide_file else self.table.drop('file', axis=1)
         return df if not date else df[df['date'] == date]
     
