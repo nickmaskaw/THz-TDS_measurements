@@ -265,8 +265,9 @@ class Measurement:
 class Data:
     folder = './output'
     
-    def __init__(self, file):
+    def __init__(self, file, zero_position=None):
         self.file = file
+        self.idn  = Identity.decode(file)
         self.time = self.read_time_domain_data(file)
         self.freq = self.compute_fft()
         
@@ -332,8 +333,7 @@ class Plot:
         if isinstance(label, list):
             return f'{label[index]}'
         else:
-            idn = Identity.decode(data.file)
-            idn_frame = idn.frame()        
+            idn_frame = data.idn.frame()        
             return f'{idn_frame[label][0]}' if label in idn_frame else None
     
     @classmethod
@@ -345,12 +345,18 @@ class Plot:
         return fig, ax
         
     @classmethod
-    def time_domain(cls, ax, *data_list, label=None, leg_title=None):
-        colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
+    def time_domain(cls, ax, *data_list, label=None, leg_title=None, colormap='rainbow', delayline_zero=None):
+        colors = cm.get_cmap(colormap)(np.linspace(0, 1, len(data_list)))
         
         for i, data in enumerate(data_list):
+            if delayline_zero:
+                D = delayline_zero - data.idn.start
+                time_shift = Convert.mm_to_ps(2*D)
+            else:
+                time_shift = 0
+            
             l = cls.get_label(data, label, i)
-            ax.plot(data.time.t, data.time.I, color=colors[i], label=l)
+            ax.plot(data.time.t + time_shift, data.time.I, color=colors[i], label=l)
             
         if leg_title: ax.legend(title=leg_title)
         ax.set_xlabel('Time (ps)')
@@ -360,8 +366,8 @@ class Plot:
             
     @classmethod
     def freq_domain(cls, ax, *data_list, y='amp', yscale='log', ymin=1e-4,
-                    ymax=1, label=None, leg_title=None):
-        colors = cm.rainbow(np.linspace(0, 1, len(data_list)))
+                    ymax=1, label=None, leg_title=None, colormap='rainbow'):
+        colors = cm.get_cmap(colormap)(np.linspace(0, 1, len(data_list)))
             
         for i, data in enumerate(data_list):
             l = cls.get_label(data, label, i)
