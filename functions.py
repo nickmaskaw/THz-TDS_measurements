@@ -309,12 +309,21 @@ class Data:
         axf.set_xlim([-0.2, 5.2])
         axf.set_ylim([1e-5, 1])
         axf.set_yscale('log')
-        
+    
     @classmethod
     def data_list(cls, file_list, *indices):
-        data_list_ = list(Data(file_list.get_file(i)) for i in indices)
+        data_list_ = []
+        for i in indices:
+            if isinstance(i, int):
+                data_list_.append(Data(file_list.get_file(i)))
+            elif isinstance(i, list) and len(i)==2:
+                i_list = list(range(i[0], i[-1]+1))
+                for j in i_list:
+                    data_list_.append(Data(file_list.get_file(j)))
+            else:
+                print(f'Warning: {i} is not an integer, nor a list of the type [imin, imax]')
         return data_list_
-    
+                
     
 class Plot:
     folder = './saved_figures'
