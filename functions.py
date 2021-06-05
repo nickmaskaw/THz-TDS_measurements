@@ -12,20 +12,19 @@ import matplotlib.cm as cm
 from scipy.fft import fft, fftfreq
 import time as tm
 import os
-import sys
 
 
 class Constants:
-    C     = 299_792_458*1e3/1e12  # mm/ps (~0.3mm/ps)
+    c     = 299_792_458*1e3/1e12  # mm/ps (~0.3mm/ps)
     n_AIR = 1.000_293             # Refractive index of air
-       
-    
+
+
 class Convert:
     def ps_to_mm(t):
-        return t*Constants.C
+        return t*Constants.c
 
     def mm_to_ps(d):
-        return d/Constants.C
+        return d/Constants.c
     
     def v_to_I(v, sensitivity):
         v_fullscale = 10  # V
@@ -34,9 +33,8 @@ class Convert:
     def I_to_v(I, sensitivity):
         v_fullscale = 10  # V
         return I * (v_fullscale / sensitivity)
-    
-    
-    
+
+
 class Identity:
     def __init__(self, start, end, sens, tcons, vel,
                  vbias, freq, hum, obs='', time_stamp=None):
@@ -221,22 +219,30 @@ class Measurement:
 class Data:
     folder = './output'
     
-    def __init__(self, file, zero_position=None):
-        self.file = file
-        self.idn  = Identity.decode(file)
-        self.time = self.read_time_domain_data(file)
-        self.freq = self.compute_fft()
+    def __init__(self, file, fft_dt=0.01):
+        self._file = file
+        self._idn  = Identity.decode(file)
+        self._time = self._read_time_domain_data(file)
+        self._freq = self.compute_fft(fft_dt)
+        
+    @property
+    def file(self): return self._file
+    @property
+    def idn(self): return self._idn    
+    @property
+    def time(self): return self._time
+    @property
+    def freq(self): return self._freq
         
     def __repr__(self):
         return f'Data from file {self.file}'
         
-    def read_time_domain_data(self, file):
+    def _read_time_domain_data(self, file):
         return pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
     
-    def compute_fft(self):
-        dt = 0.01
-        t  = self.time.t
-        I  = self.time.I
+    def compute_fft(self, dt):
+        t = self.time.t
+        I = self.time.I
         
         ti = np.arange(np.min(t), np.max(t), dt)
         Ii = np.interp(ti, t, I)
@@ -251,20 +257,10 @@ class Data:
         return pd.DataFrame({'frq': frq, 'amp': amp, 'phs': phs, 'fft': It})
     
     def plot(self):
-        fig = plt.figure()
-        
-        axt = fig.add_subplot(211)
-        axt.plot(self.time.t, self.time.I)
-        axt.set_xlabel('time (ps)')
-        axt.set_ylabel('Photocurrent (nA)')
-        
-        axf = fig.add_subplot(212)
-        axf.plot(self.freq.frq, self.freq.amp)
-        axf.set_xlabel('frequency (THz)')
-        axf.set_ylabel('Amplitude (a. u.)')
-        axf.set_xlim([-0.2, 5.2])
-        axf.set_ylim([1e-5, 1])
-        axf.set_yscale('log')
+        fig, ax = Plot.new_figure(nrows=1, ncolumns=2, fig_size=[9, 5], font_size=12)
+        Plot.time_domain(ax[0], self)
+        Plot.freq_domain(ax[1], self)
+
     
     @classmethod
     def data_list(cls, file_list, *indices):
@@ -346,7 +342,7 @@ class Plot:
         ax.set_ylabel('Amplitude (a. u.)')
         plt.tight_layout()
             
-            
+
 class FileList:
     def __init__(self, folder):
         self.folder = folder
