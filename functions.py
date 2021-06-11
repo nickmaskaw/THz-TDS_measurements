@@ -15,8 +15,10 @@ import os
 
 
 class Constants:
-    c     = 299_792_458*1e3/1e12  # mm/ps (~0.3mm/ps)
+    c     = 299_792_458e3/1e12    # mm/ps (~0.3mm/ps)
     n_AIR = 1.000_293             # Refractive index of air
+    hbar  = 6.582_119_569e-16     # eVs
+    kB    = 8.617_333_262_145e-5  # eV/K
 
 
 class Convert:
@@ -220,12 +222,15 @@ class Data:
     folder = './output'
     
     def __init__(self, file, fft_dt=0.01, td_range=(None, None)):        
+        self._raw_data = self._read_data_from_file(file)
         self._td_range = None
         self._file     = file
         self._idn      = Identity.decode(file)
         self._time     = self._read_time_domain_data(file, td_range)
         self._freq     = self.compute_fft(fft_dt)
         
+    @property
+    def raw_data(self): return self._raw_data
     @property
     def td_range(self): return self._td_range
     @property
@@ -240,6 +245,10 @@ class Data:
     def __repr__(self):
         cut = f' | range={self.td_range}ps' if self.td_range else ''
         return f'Data from file {self.file}{cut}'
+    
+    def _read_data_from_file(self, file):
+        data = pd.read_table(f'{Data.folder}/{file}')
+        return data
         
     def _read_time_domain_data(self, file, td_range):
         data = pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
