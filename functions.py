@@ -219,12 +219,15 @@ class Measurement:
 class Data:
     folder = './output'
     
-    def __init__(self, file, fft_dt=0.01):
-        self._file = file
-        self._idn  = Identity.decode(file)
-        self._time = self._read_time_domain_data(file)
-        self._freq = self.compute_fft(fft_dt)
+    def __init__(self, file, fft_dt=0.01, td_range=(None, None)):        
+        self._td_range = None
+        self._file     = file
+        self._idn      = Identity.decode(file)
+        self._time     = self._read_time_domain_data(file, td_range)
+        self._freq     = self.compute_fft(fft_dt)
         
+    @property
+    def td_range(self): return self._td_range
     @property
     def file(self): return self._file
     @property
@@ -235,10 +238,21 @@ class Data:
     def freq(self): return self._freq
         
     def __repr__(self):
-        return f'Data from file {self.file}'
+        cut = f' | range={self.td_range}ps' if self.td_range else ''
+        return f'Data from file {self.file}{cut}'
         
-    def _read_time_domain_data(self, file):
-        return pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
+    def _read_time_domain_data(self, file, td_range):
+        data = pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
+        
+        if isinstance(td_range, (list, tuple)) and len(td_range)==2:
+            if td_range == (None, None):
+                return data
+            else:
+                self._td_range = td_range
+                return data.loc[data.t.between(td_range[0], td_range[1])]
+        else:
+            print(f'{td_range} is not a valid td_range of the type (tmin, tmax)')
+            return data
     
     def compute_fft(self, dt):
         t = self.time.t
@@ -263,15 +277,15 @@ class Data:
 
     
     @classmethod
-    def data_list(cls, file_list, *indices):
+    def data_list(cls, file_list, *indices, fft_dt=0.01, td_range=(None, None)):
         data_list_ = []
         for i in indices:
             if isinstance(i, int):
-                data_list_.append(Data(file_list.get_file(i)))
-            elif isinstance(i, list) and len(i)==2:
+                data_list_.append(Data(file_list.get_file(i), fft_dt, td_range))
+            elif isinstance(i, (list, tuple)) and len(i)==2:
                 i_list = list(range(i[0], i[-1]+1))
                 for j in i_list:
-                    data_list_.append(Data(file_list.get_file(j)))
+                    data_list_.append(Data(file_list.get_file(j), fft_dt, td_range))
             else:
                 print(f'Warning: {i} is not an integer, nor a list of the type [imin, imax]')
         return data_list_
@@ -345,19 +359,19 @@ class Plot:
 
 class FileList:
     def __init__(self, folder):
-        self.folder = folder
-        self.time   = tm.strftime('%d/%m/%Y @ %H:%M:%S')
-        self.table  = self.frame(folder, *os.listdir(folder))
+        self._folder = folder
+        self._time   = tm.strftime('%d/%m/%Y @ %H:%M:%S')
+        self._table  = self.frame(folder, *os.listdir(folder))
         
     def __repr__(self):
-        return f'File list of "{self.folder}" generated on {self.time}'
+        return f'File list of "{self._folder}" generated on {self._time}'
     
     def get_file(self, index):
-        return self.table.file[index]
+        return self._table.file[index]
     
     def get_table(self, date=None, hide_file=True, max_rows=60):
         pd.set_option('display.max_rows', max_rows)
-        df = self.table if not hide_file else self.table.drop('file', axis=1)
+        df = self._table if not hide_file else self._table.drop('file', axis=1)
         return df if not date else df[df['date'] == date]
     
     @classmethod
