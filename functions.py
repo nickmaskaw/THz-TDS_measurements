@@ -5,7 +5,6 @@ Created on Mon Mar 29 09:48:28 2021
 @author: nicolas kawahala
 """
 
-import pyvisa as pv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,35 +12,21 @@ import matplotlib.cm as cm
 from scipy.fft import fft, fftfreq
 import time as tm
 import os
-import sys
-
-import clr
-from System import String
-from System import Decimal
-from System.Collections import *
-
-if not r'C:\Program Files\Thorlabs\Kinesis' in sys.path:
-    sys.path.append(r'C:\Program Files\Thorlabs\Kinesis')
-    
-clr.AddReference("Thorlabs.MotionControl.DeviceManagerCLI")
-from Thorlabs.MotionControl.DeviceManagerCLI import *
-
-clr.AddReference("Thorlabs.MotionControl.KCube.BrushlessMotorCLI")
-from Thorlabs.MotionControl.KCube.BrushlessMotorCLI import *
-
 
 
 class Constants:
-    C     = 299_792_458*1e3/1e12  # mm/ps (~0.3mm/ps)
+    c     = 299_792_458e3/1e12    # mm/ps (~0.3mm/ps)
     n_AIR = 1.000_293             # Refractive index of air
-       
-    
+    hbar  = 6.582_119_569e-16     # eVs
+    kB    = 8.617_333_262_145e-5  # eV/K
+
+
 class Convert:
     def ps_to_mm(t):
-        return t*Constants.C
+        return t*Constants.c
 
     def mm_to_ps(d):
-        return d/Constants.C
+        return d/Constants.c
     
     def v_to_I(v, sensitivity):
         v_fullscale = 10  # V
@@ -50,37 +35,8 @@ class Convert:
     def I_to_v(I, sensitivity):
         v_fullscale = 10  # V
         return I * (v_fullscale / sensitivity)
-    
-    
-class Multimeter:
-    def __init__(self, init_open=True, 
-                 VISA_ADDRESS='USB0::0x0957::0x0607::MY47027685::INSTR'):
-        self.VISA_ADDRESS = VISA_ADDRESS
-        self.instr = None
-        self.instr_idn = 'no instrument'
-        
-        if init_open: self.open_()
-        
-    def __repr__(self):
-        return f'This instrument: {self.instr_idn}'
-            
-    def open_(self):
-        rm = pv.ResourceManager()
-        
-        try:
-            self.instr = rm.open_resource(self.VISA_ADDRESS)
-            self.instr_idn = self.instr.query('*IDN?')
-        except:
-            print('ERROR. Check if the intended VISA address is listed below:')
-            print(rm.list_resources())
-            
-    def close(self):
-        self.instr.close()
-        
-    def get_meas(self):
-        return self.instr.query('MEAS?')
-    
-    
+
+
 class Identity:
     def __init__(self, start, end, sens, tcons, vel,
                  vbias, freq, hum, obs='', time_stamp=None):
@@ -265,22 +221,51 @@ class Measurement:
 class Data:
     folder = './output'
     
-    def __init__(self, file, zero_position=None):
-        self.file = file
-        self.idn  = Identity.decode(file)
-        self.time = self.read_time_domain_data(file)
-        self.freq = self.compute_fft()
+    def __init__(self, file, fft_dt=0.01, td_range=(None, None)):        
+        self._raw_data = self._read_data_from_file(file)
+        self._td_range = None
+        self._file     = file
+        self._idn      = Identity.decode(file)
+        self._time     = self._read_time_domain_data(file, td_range)
+        self._freq     = self.compute_fft(fft_dt)
+        
+    @property
+    def raw_data(self): return self._raw_data
+    @property
+    def td_range(self): return self._td_range
+    @property
+    def file(self): return self._file
+    @property
+    def idn(self): return self._idn    
+    @property
+    def time(self): return self._time
+    @property
+    def freq(self): return self._freq
         
     def __repr__(self):
-        return f'Data from file {self.file}'
-        
-    def read_time_domain_data(self, file):
-        return pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
+        cut = f' | range={self.td_range}ps' if self.td_range else ''
+        return f'Data from file {self.file}{cut}'
     
-    def compute_fft(self):
-        dt = 0.01
-        t  = self.time.t
-        I  = self.time.I
+    def _read_data_from_file(self, file):
+        data = pd.read_table(f'{Data.folder}/{file}')
+        return data
+        
+    def _read_time_domain_data(self, file, td_range):
+        data = pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
+        
+        if isinstance(td_range, (list, tuple)) and len(td_range)==2:
+            if td_range == (None, None):
+                return data
+            else:
+                self._td_range = td_range
+                return data.loc[data.t.between(td_range[0], td_range[1])]
+        else:
+            print(f'{td_range} is not a valid td_range of the type (tmin, tmax)')
+            return data
+    
+    def compute_fft(self, dt):
+        t = self.time.t
+        I = self.time.I
         
         ti = np.arange(np.min(t), np.max(t), dt)
         Ii = np.interp(ti, t, I)
@@ -295,31 +280,21 @@ class Data:
         return pd.DataFrame({'frq': frq, 'amp': amp, 'phs': phs, 'fft': It})
     
     def plot(self):
-        fig = plt.figure()
-        
-        axt = fig.add_subplot(211)
-        axt.plot(self.time.t, self.time.I)
-        axt.set_xlabel('time (ps)')
-        axt.set_ylabel('Photocurrent (nA)')
-        
-        axf = fig.add_subplot(212)
-        axf.plot(self.freq.frq, self.freq.amp)
-        axf.set_xlabel('frequency (THz)')
-        axf.set_ylabel('Amplitude (a. u.)')
-        axf.set_xlim([-0.2, 5.2])
-        axf.set_ylim([1e-5, 1])
-        axf.set_yscale('log')
+        fig, ax = Plot.new_figure(nrows=1, ncolumns=2, fig_size=[9, 5], font_size=12)
+        Plot.time_domain(ax[0], self)
+        Plot.freq_domain(ax[1], self)
+
     
     @classmethod
-    def data_list(cls, file_list, *indices):
+    def data_list(cls, file_list, *indices, fft_dt=0.01, td_range=(None, None)):
         data_list_ = []
         for i in indices:
             if isinstance(i, int):
-                data_list_.append(Data(file_list.get_file(i)))
-            elif isinstance(i, list) and len(i)==2:
+                data_list_.append(Data(file_list.get_file(i), fft_dt, td_range))
+            elif isinstance(i, (list, tuple)) and len(i)==2:
                 i_list = list(range(i[0], i[-1]+1))
                 for j in i_list:
-                    data_list_.append(Data(file_list.get_file(j)))
+                    data_list_.append(Data(file_list.get_file(j), fft_dt, td_range))
             else:
                 print(f'Warning: {i} is not an integer, nor a list of the type [imin, imax]')
         return data_list_
@@ -390,22 +365,22 @@ class Plot:
         ax.set_ylabel('Amplitude (a. u.)')
         plt.tight_layout()
             
-            
+
 class FileList:
     def __init__(self, folder):
-        self.folder = folder
-        self.time   = tm.strftime('%d/%m/%Y @ %H:%M:%S')
-        self.table  = self.frame(folder, *os.listdir(folder))
+        self._folder = folder
+        self._time   = tm.strftime('%d/%m/%Y @ %H:%M:%S')
+        self._table  = self.frame(folder, *os.listdir(folder))
         
     def __repr__(self):
-        return f'File list of "{self.folder}" generated on {self.time}'
+        return f'File list of "{self._folder}" generated on {self._time}'
     
     def get_file(self, index):
-        return self.table.file[index]
+        return self._table.file[index]
     
     def get_table(self, date=None, hide_file=True, max_rows=60):
         pd.set_option('display.max_rows', max_rows)
-        df = self.table if not hide_file else self.table.drop('file', axis=1)
+        df = self._table if not hide_file else self._table.drop('file', axis=1)
         return df if not date else df[df['date'] == date]
     
     @classmethod
@@ -421,96 +396,4 @@ class FileList:
             
             df = df.append(idn_frame, ignore_index=True)
         
-        return df            
-            
-        
-        
-class KBD101:
-    def __init__(self, serial, simulated=False):
-        self._serial = serial
-        self._device = self._build_device(serial, simulated)
-        
-        self.connect()
-        tm.sleep(.2)
-        self._motor_config = self._load_motor_config(serial)
-        
-    def __repr__(self):
-        info = self.get_info()
-        return 'Device: {} (serial no. {})  |  Stage: {} (serial no. {})'.format(*tuple(info.values()))
-    
-    def _build_device(self, serial, simulated=False):
-        if isinstance(serial, str) and serial[:2] == '28':
-            if not simulated: DeviceManagerCLI.BuildDeviceList()
-            else: SimulationManager.Instance.InitializeSimulations()
-                
-            device_list = DeviceManagerCLI.GetDeviceList()
-            if serial in device_list:
-                device = KCubeBrushlessMotor.CreateKCubeBrushlessMotor(serial)
-                return device
-            else:
-                print('Check in the intended serial number is listed below:')
-                print(device_list)
-                return None
-        else:
-            print('Check if the intended serial number is a string that begins with "28".')
-            return None
-        
-    def _load_motor_config(self, serial):
-        motor_config = self._device.LoadMotorConfiguration(serial)
-        return motor_config
-        
-    def connect(self):
-        self._device.Connect(self._serial)
-        
-    def disconnect(self):
-        self._device.Disconnect()
-        
-    def get_info(self):
-        device_info = self._device.GetDeviceInfo()
-        stage_info  = self._device.GetStageDefinition()
-        useful_info = {'deviceName'   : device_info.Name,
-                       'deviceSerial' : device_info.SerialNumber,
-                       'stageName'    : stage_info.PartNumber,
-                       'stageSerial'  : stage_info.SerialNumber}
-        return useful_info
-    
-    def enable(self):
-        self._device.EnableDevice()
-        tm.sleep(2)
-        
-    def disable(self):
-        self._device.DisableDevice()
-    
-    def start_polling(self, rate=50):
-        self._device.StartPolling(rate)
-        
-    def stop_polling(self):
-        self._device.StopPolling()
-        
-    def get_polling_rate(self):
-        return self._device.PollingDuration()
-        
-    def home(self, polling_rate=50, timeout=60000):
-        poll = False if self.get_polling_rate() else True
-        
-        if poll: self.start_polling()
-        self._device.Home(timeout)
-        if poll: self.stop_polling()
-            
-    def move_to(self, pos, timeout=60000):
-        self._device.MoveTo(Decimal(float(pos)), timeout)
-        
-    def return_to(self, pos, timeout=60000):
-        self.set_vel(100)
-        self.move_to(pos, timeout)
-        
-    def get_pos(self):
-        pos = str(self._device.Position).replace(',', '.')
-        return float(pos)
-    
-    def get_vel(self):
-        vel = str(self._device.GetVelocityParams().MaxVelocity).replace(',', '.')
-        return float(vel)
-    
-    def set_vel(self, vel, acceleration=999):
-        self._device.SetVelocityParams(Decimal(vel), Decimal(acceleration))
+        return df
