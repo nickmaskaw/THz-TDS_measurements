@@ -221,58 +221,69 @@ class Measurement:
 class Data:
     folder = './output'
     
-    def __init__(self, file, fft_dt=0.01, td_range=(None, None)):        
-        self._raw_data = self._read_data_from_file(file)
-        self._td_range = None
-        self._file     = file
-        self._idn      = Identity.decode(file)
-        self._time     = self._read_time_domain_data(file, td_range)
-        self._freq     = self.compute_fft(fft_dt)
+    def __init__(self, file, dt=0.033, time_range=(None, None), delayline_zero=None):        
+        self._file       = file
+        self._dt         = dt
+        self._time_range = None
+        self._idn        = Identity.decode(file)
+        self._raw_data   = self._read_data_from_file(file)
+        self._time       = self._fix_time_domain_data(dt, time_range, delayline_zero)
+        self._freq       = self._compute_fft()
         
-    @property
-    def raw_data(self): return self._raw_data
-    @property
-    def td_range(self): return self._td_range
     @property
     def file(self): return self._file
     @property
-    def idn(self): return self._idn    
+    def dt(self): return self._dt
+    @property
+    def time_range(self): return self._time_range
+    @property
+    def idn(self): return self._idn   
+    @property
+    def raw_data(self): return self._raw_data 
     @property
     def time(self): return self._time
     @property
     def freq(self): return self._freq
         
     def __repr__(self):
-        cut = f' | range={self.td_range}ps' if self.td_range else ''
+        cut = f' | range={self.time_range}ps' if self.time_range else ''
         return f'Data from file {self.file}{cut}'
     
     def _read_data_from_file(self, file):
         data = pd.read_table(f'{Data.folder}/{file}')
         return data
         
-    def _read_time_domain_data(self, file, td_range):
-        data = pd.read_table(f'{Data.folder}/{file}', usecols=['t', 'I'])
-        
-        if isinstance(td_range, (list, tuple)) and len(td_range)==2:
-            if td_range == (None, None):
-                return data
-            else:
-                self._td_range = td_range
-                return data.loc[data.t.between(td_range[0], td_range[1])]
+    def _fix_time_domain_data(self, dt, time_range, delayline_zero):
+        if delayline_zero:
+            D = delayline_zero - self.idn.start
+            time_shift = Convert.mm_to_ps(2*D)
         else:
-            print(f'{td_range} is not a valid td_range of the type (tmin, tmax)')
-            return data
+            time_shift = 0
+        
+        raw_t = self.raw_data.t + time_shift
+        raw_I = self.raw_data.I
+        
+        tmin, tmax = np.min(raw_t), np.max(raw_t)
+        if isinstance(time_range, (list, tuple)) and len(time_range)==2:
+            if time_range != (None, None):
+                self._time_range = time_range
+                tmin, tmax = time_range
+        else:
+            print(f'{time_range} is not a valid time_range of the type (tmin, tmax)')
+            
+        t = np.arange(tmin, tmax+dt, dt)
+        I = np.interp(t, raw_t, raw_I)
+        
+        return pd.DataFrame({'t':t, 'I':I}).dropna()
     
-    def compute_fft(self, dt):
-        t = self.time.t
-        I = self.time.I
+    def _compute_fft(self):
+        t  = self.time.t.values
+        I  = self.time.I.values
+        dt = self.dt        
         
-        ti = np.arange(np.min(t), np.max(t), dt)
-        Ii = np.interp(ti, t, I)
+        N = len(t)
         
-        N = len(ti)
-        
-        It = fft(Ii)[:N//2]
+        It = fft(I)[:N//2]
         amp = (2/N) * np.abs(It)
         phs = np.angle(It)
         frq = fftfreq(N, dt)[:N//2]
@@ -283,18 +294,17 @@ class Data:
         fig, ax = Plot.new_figure(nrows=1, ncolumns=2, fig_size=[9, 5], font_size=12)
         Plot.time_domain(ax[0], self)
         Plot.freq_domain(ax[1], self)
-
     
     @classmethod
-    def data_list(cls, file_list, *indices, fft_dt=0.01, td_range=(None, None)):
+    def data_list(cls, file_list, *indices, dt=0.01, time_range=(None, None), delayline_zero=None):
         data_list_ = []
         for i in indices:
             if isinstance(i, int):
-                data_list_.append(Data(file_list.get_file(i), fft_dt, td_range))
+                data_list_.append(Data(file_list.get_file(i), dt, time_range, delayline_zero))
             elif isinstance(i, (list, tuple)) and len(i)==2:
                 i_list = list(range(i[0], i[-1]+1))
                 for j in i_list:
-                    data_list_.append(Data(file_list.get_file(j), fft_dt, td_range))
+                    data_list_.append(Data(file_list.get_file(j), dt, time_range, delayline_zero))
             else:
                 print(f'Warning: {i} is not an integer, nor a list of the type [imin, imax]')
         return data_list_
@@ -329,18 +339,12 @@ class Plot:
         return fig, ax
         
     @classmethod
-    def time_domain(cls, ax, *data_list, label=None, leg_title=None, colormap='rainbow', delayline_zero=None):
+    def time_domain(cls, ax, *data_list, label=None, leg_title=None, colormap='rainbow'):
         colors = cm.get_cmap(colormap)(np.linspace(0, 1, len(data_list)))
         
         for i, data in enumerate(data_list):
-            if delayline_zero:
-                D = delayline_zero - data.idn.start
-                time_shift = Convert.mm_to_ps(2*D)
-            else:
-                time_shift = 0
-            
             l = cls.get_label(data, label, i)
-            ax.plot(data.time.t + time_shift, data.time.I, color=colors[i], label=l)
+            ax.plot(data.time.t, data.time.I, color=colors[i], label=l)
             
         if leg_title: ax.legend(title=leg_title)
         ax.set_xlabel('Time (ps)')
