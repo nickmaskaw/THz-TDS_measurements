@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from scipy.fft import fft, fftfreq
+from scipy.optimize import curve_fit as fit
 import time as tm
 import os
 
@@ -283,7 +284,7 @@ class Data:
         
         N = len(t)
         
-        It = fft(I)[:N//2]
+        It  = np.conj(fft(I)[:N//2])  ### Changed to complex conjugate to fix analysis
         amp = (2/N) * np.abs(It)
         phs = np.angle(It)
         frq = fftfreq(N, dt)[:N//2]
@@ -309,7 +310,55 @@ class Data:
                 print(f'Warning: {i} is not an integer, nor a list of the type [imin, imax]')
         return data_list_
                 
+
+class Transmittance:
+    def __init__(self, data, ref):
+        self._data, self._ref = self._verify_data(data, ref)
+        self._T    = self._compute_T()
+        self._func = None
+        
+    @property
+    def data(self): return self._data
+    @property
+    def ref(self): return self._ref
+    @property
+    def T(self): return self._T
+    @property
+    def func(self): return self._func
     
+    def _verify_data(self, data, ref):
+        if not np.array_equal(data.freq.frq, ref.freq.frq):
+            print('Data and reference frequency points are not equivalent')
+            return None, None
+        else:
+            return data, ref
+    
+    def _compute_T(self):
+        if self.data and self.ref:
+            freq = self.data.freq.frq
+            Es   = self.data.freq.fft
+            Eref = self.ref.freq.fft
+            T    = Es/Eref
+            
+            return pd.DataFrame({'freq': freq, 'complex': T, 'real': np.real(T),
+                                 'imag': np.imag(T), 'ampl': np.abs(T), 'phase': np.angle(T)})
+        
+    def fit(self, func, p0, freq_range=(0, 1.5), bounds=(-np.inf, np.inf)):
+        self._func = func
+        
+        T = self.T.loc[self.T.freq.between(*freq_range)]
+        
+        real_func = lambda *args: np.real(func(*args))
+        imag_func = lambda *args: np.imag(func(*args))
+        
+        ropt, rcov = fit(real_func, T.freq, T.real, p0=p0, bounds=bounds)
+        iopt, icov = fit(imag_func, T.freq, T.imag, p0=p0, bounds=bounds)
+        rerr = np.sqrt(np.diag(rcov))
+        ierr = np.sqrt(np.diag(icov))
+        
+        return pd.DataFrame({'r': ropt, 'rerr': rerr, 'i': iopt, 'ierr': ierr})
+
+
 class Plot:
     folder = './saved_figures'
     
@@ -368,6 +417,15 @@ class Plot:
         ax.set_xlabel('Frequency (THz)')
         ax.set_ylabel('Amplitude (a. u.)')
         plt.tight_layout()
+        
+    
+    @classmethod
+    def T(cls, ax, Tdata, col='ampl', xlim=[-.1, 2], ylim=[4, -4], fit=False,
+          custom_func=None, custom_params=None):
+        
+        ax.plot(Tdata.T.freq, Tdata.T[col], 'k.')
+        if fit:
+            opt = T.fit()
             
 
 class FileList:
