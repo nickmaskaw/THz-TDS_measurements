@@ -251,7 +251,7 @@ class Data:
         return f'Data from file {self.file}{cut}'
     
     def _read_data_from_file(self, file):
-        data = pd.read_table(f'{Data.folder}/{file}')
+        data = pd.read_table(f'{Data.folder}/{file}').dropna()
         return data
         
     def _fix_time_domain_data(self, dt, time_range, delayline_zero):
@@ -261,8 +261,8 @@ class Data:
         else:
             time_shift = 0
         
-        raw_t = self.raw_data.t + time_shift
-        raw_I = self.raw_data.I
+        raw_t = self.raw_data.t.values + time_shift
+        raw_I = self.raw_data.I.values
         
         tmin, tmax = np.min(raw_t), np.max(raw_t)
         if isinstance(time_range, (list, tuple)) and len(time_range)==2:
@@ -271,6 +271,9 @@ class Data:
                 tmin, tmax = time_range
         else:
             print(f'{time_range} is not a valid time_range of the type (tmin, tmax)')
+            
+        if tmin < raw_t[0]  : raw_I[0]   = 0
+        if tmax > raw_t[-1]: raw_I[-1] = 0
             
         t = np.arange(tmin, tmax+dt, dt)
         I = np.interp(t, raw_t, raw_I)
@@ -381,41 +384,43 @@ class Plot:
     
     @classmethod
     def new_figure(cls, nrows=1, ncolumns=1, title=None, fig_size=[5, 5],
-                   font_size=16):
+                   font_size=16, dpi=100):
         with plt.rc_context({'font.size': font_size}):
-            fig, ax = plt.subplots(nrows, ncolumns, figsize=fig_size)
+            fig, ax = plt.subplots(nrows, ncolumns, figsize=fig_size, dpi=dpi)
         fig.suptitle(title)
         return fig, ax
         
     @classmethod
-    def time_domain(cls, ax, *data_list, label=None, leg_title=None, colormap='rainbow'):
+    def time_domain(cls, ax, *data_list, label=None, leg_title=None, colormap='rainbow',
+                    xlabel='Time (ps)', ylabel='Photocurrent (nA)', linewidth=1):
         colors = cm.get_cmap(colormap)(np.linspace(0, 1, len(data_list)))
         
         for i, data in enumerate(data_list):
             l = cls.get_label(data, label, i)
-            ax.plot(data.time.t, data.time.I, color=colors[i], label=l)
+            ax.plot(data.time.t, data.time.I, color=colors[i], label=l, linewidth=linewidth)
             
         if leg_title: ax.legend(title=leg_title)
-        ax.set_xlabel('Time (ps)')
-        ax.set_ylabel('Photocurrent (nA)')
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         plt.tight_layout()
 
             
     @classmethod
     def freq_domain(cls, ax, *data_list, y='amp', yscale='log', ymin=1e-4,
-                    ymax=1, label=None, leg_title=None, colormap='rainbow'):
+                    ymax=1, label=None, leg_title=None, colormap='rainbow',
+                    xlabel='Frequency (THz)', ylabel='Amplitude (a. u.)', linewidth=1):
         colors = cm.get_cmap(colormap)(np.linspace(0, 1, len(data_list)))
             
         for i, data in enumerate(data_list):
             l = cls.get_label(data, label, i)
-            ax.plot(data.freq.frq, np.abs(data.freq[y]), color=colors[i], label=l)
+            ax.plot(data.freq.frq, np.abs(data.freq[y]), color=colors[i], label=l, linewidth=linewidth)
             
         if leg_title: ax.legend(title=leg_title)
         ax.set_yscale(yscale)
         ax.set_xlim([-0.2, 5.2])
         ax.set_ylim([ymin, ymax])
-        ax.set_xlabel('Frequency (THz)')
-        ax.set_ylabel('Amplitude (a. u.)')
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         plt.tight_layout()
         
     
